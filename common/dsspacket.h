@@ -1,9 +1,11 @@
 #ifndef COMMON_DSSPACKET_H
 #define COMMON_DSSPACKET_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #define REQ_NONCE_LEN 16u
+#define DSSPACKET_AAD_LEN 21u
 
 typedef enum dss_opcode {
     PING = 1,
@@ -18,6 +20,8 @@ typedef struct dss_header {
     uint32_t payload_len; /* Network byte order. */
 } dss_header_t;
 #pragma pack(pop)
+
+int dsspacket_build_aad(const dss_header_t *hdr, uint8_t aad_out[DSSPACKET_AAD_LEN], size_t *aad_len);
 
 int dsspacket_send(int fd, const dss_header_t *hdr, const uint8_t *payload);
 int dsspacket_recv(int fd, dss_header_t *hdr, uint8_t **payload_out);
