@@ -1,0 +1,10 @@
+# Binaries
+server/dss_server
+client/dss_client
+
+# Object files
+*.o
+
+# Temporary files
+*~
+
