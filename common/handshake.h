@@ -5,40 +5,35 @@
 #include <stdint.h>
 
 #include <openssl/evp.h>
+#include <openssl/obj_mac.h>
 
-#define HS_ECDH_KEY_LEN 32u
-#define HS_SIGN_KEY_LEN 32u
-#define HS_SIG_LEN 64u
+#define ECDH_CURVE_NID NID_X9_62_prime256v1
 
-/*
- * Generate an ephemeral X25519 keypair for key agreement.
- * Returns 0 on success and -1 on failure.
- */
-int hs_generate_ecdh_keypair(uint8_t priv_out[HS_ECDH_KEY_LEN],
-                             uint8_t pub_out[HS_ECDH_KEY_LEN]);
+typedef enum hs_msg_type {
+    HS_CHLO = 1,
+    HS_SHLO = 2,
+} hs_msg_type_t;
 
-/*
- * Derive a shared secret using local X25519 private key and peer public key.
- * Returns 0 on success and -1 on failure.
- */
-int hs_derive_shared_secret(const uint8_t local_priv[HS_ECDH_KEY_LEN],
-                            const uint8_t peer_pub[HS_ECDH_KEY_LEN],
-                            uint8_t shared_secret_out[HS_ECDH_KEY_LEN]);
+int hs_send_chlo(int fd, const uint8_t *client_pub, size_t client_pub_len);
+int hs_recv_chlo(int fd, uint8_t **client_pub, size_t *client_pub_len);
 
-/*
- * Sign the server ephemeral public key using Ed25519 server signing key.
- * Returns 0 on success and -1 on failure.
- */
-int hs_sign_server_ephemeral(const uint8_t server_sign_priv[HS_SIGN_KEY_LEN],
-                             const uint8_t server_eph_pub[HS_ECDH_KEY_LEN],
-                             uint8_t signature_out[HS_SIG_LEN]);
+int hs_send_shlo(int fd, const uint8_t *server_pub, size_t server_pub_len,
+                 const uint8_t *sig, size_t sig_len);
+int hs_recv_shlo(int fd, uint8_t **server_pub, size_t *server_pub_len,
+                 uint8_t **sig, size_t *sig_len);
 
-/*
- * Verify server signature over its ephemeral public key.
- * Returns 0 on success and -1 on failure.
- */
-int hs_verify_server_ephemeral(const uint8_t server_sign_pub[HS_SIGN_KEY_LEN],
-                               const uint8_t server_eph_pub[HS_ECDH_KEY_LEN],
-                               const uint8_t signature[HS_SIG_LEN]);
+int hs_derive_keys(const uint8_t *shared_secret, size_t shared_secret_len,
+                   const uint8_t *transcript, size_t transcript_len,
+                   uint8_t c2s_key[32], uint8_t s2c_key[32]);
+
+int hs_gen_ecdh_keypair(uint8_t **pub_out, size_t *pub_len_out, EVP_PKEY **pkey_out);
+int hs_compute_shared(EVP_PKEY *own_priv, const uint8_t *peer_pub, size_t peer_pub_len,
+                      uint8_t **secret_out, size_t *secret_len_out);
+int hs_sign_transcript(const char *server_priv_pem_path,
+                       const uint8_t *t, size_t tlen,
+                       uint8_t **sig_out, size_t *sig_len_out);
+int hs_verify_transcript(const char *server_pub_pem_path,
+                         const uint8_t *t, size_t tlen,
+                         const uint8_t *sig, size_t siglen);
 
 #endif /* COMMON_HANDSHAKE_H */
