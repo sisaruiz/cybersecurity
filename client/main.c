@@ -71,7 +71,7 @@ static int send_encrypted_ping(int fd,
     }
 
     memset(&hdr, 0, sizeof(hdr));
-    hdr.opcode = PING;
+    hdr.opcode = OP_SIGN_DOC;
     memcpy(hdr.req_nonce, req_nonce, REQ_NONCE_LEN);
     hdr.payload_len = htonl((uint32_t)payload_len);
 

@@ -34,7 +34,7 @@ static int send_encrypted_pong(int fd,
     }
 
     memset(&out_hdr, 0, sizeof(out_hdr));
-    out_hdr.opcode = PONG;
+    out_hdr.opcode = OP_SIGN_DOC;
     memcpy(out_hdr.req_nonce, req_nonce, REQ_NONCE_LEN);
     out_hdr.payload_len = htonl((uint32_t)total_payload_len);
 
@@ -251,7 +251,7 @@ int main(int argc, char **argv)
             break;
         }
 
-        if (in_hdr.opcode == PING) {
+        if (in_hdr.opcode == OP_SIGN_DOC) {
             reply_text = (replay_rc == 0) ? "REPLAY" : "OK";
         } else {
             reply_text = "UNKNOWN";

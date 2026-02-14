@@ -8,9 +8,22 @@
 #define DSSPACKET_AAD_LEN 21u
 
 typedef enum dss_opcode {
-    PING = 1,
-    PONG = 2,
+    OP_CHANGE_PASSWORD = 1,
+    OP_CREATE_KEYS = 2,
+    OP_SIGN_DOC = 3,
+    OP_GET_PUBLIC_KEY = 4,
+    OP_DELETE_KEYS = 5,
 } dss_opcode_t;
+
+typedef enum dss_status {
+    ST_OK = 0,
+    ST_ERR = 1,
+    ST_ERR_AUTH = 2,
+    ST_ERR_DELETED = 3,
+    ST_ERR_NOT_FOUND = 4,
+    ST_ERR_BAD_REQ = 5,
+    ST_ERR_INTERNAL = 6,
+} dss_status_t;
 
 #pragma pack(push, 1)
 typedef struct dss_header {
@@ -19,6 +32,12 @@ typedef struct dss_header {
     uint8_t req_nonce[REQ_NONCE_LEN];
     uint32_t payload_len; /* Network byte order. */
 } dss_header_t;
+
+typedef struct dss_response_header {
+    uint16_t status;   /* Network byte order. */
+    uint16_t reserved; /* Network byte order. */
+    uint32_t data_len; /* Network byte order. */
+} dss_response_header_t;
 #pragma pack(pop)
 
 int dsspacket_build_aad(const dss_header_t *hdr, uint8_t aad_out[DSSPACKET_AAD_LEN], size_t *aad_len);
