@@ -33,3 +33,14 @@ After `deletekeys`, the final `signdoc` must be refused with:
 ```text
 Operation refused: keys deleted (tombstone). Re-registration required.
 ```
+
+
+## Offline Account Provisioning
+
+Use `server/account_provision` to register accounts directly in `server/res/users.db` from the server machine itself (no network path is used).
+
+```bash
+./server/account_provision register <username> <new_password>
+```
+
+This local tool is required to re-register a user after tombstone deletion (`deleted=1`), because active accounts are intentionally not overwritten.
