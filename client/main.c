@@ -31,7 +31,7 @@ static const char *status_to_string(dss_status_t st)
     case ST_ERR_AUTH:
         return "authentication error";
     case ST_ERR_DELETED:
-        return "account deleted";
+        return "keys deleted (tombstone)";
     case ST_ERR_NOT_FOUND:
         return "not found";
     case ST_ERR_BAD_REQ:
@@ -45,6 +45,11 @@ static const char *status_to_string(dss_status_t st)
 
 static void print_command_failure(const char *command, dss_status_t st, const cli_state_t *state)
 {
+    if (st == ST_ERR_DELETED) {
+        puts("Operation refused: keys deleted (tombstone). Re-registration required.");
+        return;
+    }
+
     printf("%s failed: %s\n", command, status_to_string(st));
     if (st == ST_ERR_AUTH && state != NULL && state->must_change == 1) {
         puts("Hint: run 'changepw' first.");

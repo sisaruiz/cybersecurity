@@ -568,6 +568,17 @@ int ks_sign_doc_session(const char *username,
         return -1;
     }
 
+    {
+        int deleted;
+
+        if (auth_get_deleted(username, &deleted) != 0) {
+            return -1;
+        }
+        if (deleted != 0) {
+            return -1;
+        }
+    }
+
     if (ks_build_user_paths(username, user_dir, pub_path, enc_path) != 0) {
         return -1;
     }
@@ -670,7 +681,12 @@ int ks_sign_doc(const char *username, const char *password,
                 uint8_t **sig, size_t *sig_len)
 {
     uint8_t session_key[32];
+    int deleted;
     int rc;
+
+    if (auth_get_deleted(username, &deleted) != 0 || deleted != 0) {
+        return -1;
+    }
 
     if (ks_derive_session_key(username, password, session_key) != 0) {
         return -1;

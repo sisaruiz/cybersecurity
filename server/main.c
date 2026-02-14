@@ -108,11 +108,6 @@ static int send_encrypted_response(int fd,
     return 0;
 }
 
-static int require_authenticated(const session_state_t *sess)
-{
-    return (sess->is_authenticated == 1 && sess->deleted == 0 && sess->has_key == 1) ? 0 : -1;
-}
-
 int main(int argc, char **argv)
 {
     const char *port;
@@ -276,6 +271,10 @@ int main(int argc, char **argv)
 
         if (in_hdr.opcode != OP_AUTH && in_hdr.opcode != OP_GET_PUBLIC_KEY && session.is_authenticated == 0) {
             status = ST_ERR_AUTH;
+        } else if (session.is_authenticated == 1 && session.deleted == 1 &&
+                   in_hdr.opcode != OP_AUTH && in_hdr.opcode != OP_GET_PUBLIC_KEY &&
+                   in_hdr.opcode != OP_LOGOUT) {
+            status = ST_ERR_DELETED;
         } else if (in_hdr.opcode == OP_AUTH) {
             uint8_t ulen;
             uint8_t plen;
@@ -330,7 +329,10 @@ int main(int argc, char **argv)
                     }
                 }
             }
-        } else if (session.must_change == 1 && in_hdr.opcode != OP_CHANGE_PASSWORD && in_hdr.opcode != OP_LOGOUT) {
+        } else if (session.must_change == 1 &&
+                   in_hdr.opcode != OP_CHANGE_PASSWORD &&
+                   in_hdr.opcode != OP_AUTH &&
+                   in_hdr.opcode != OP_LOGOUT) {
             status = ST_ERR_AUTH;
         } else {
             switch (in_hdr.opcode) {
@@ -338,8 +340,16 @@ int main(int argc, char **argv)
                 uint8_t nlen;
                 char new_pw[256];
                 uint8_t new_key[32];
-                if (require_authenticated(&session) != 0 || ct_len < 1u) {
+                if (session.is_authenticated != 1 || session.has_key != 1) {
                     status = ST_ERR_AUTH;
+                    break;
+                }
+                if (session.deleted == 1) {
+                    status = ST_ERR_DELETED;
+                    break;
+                }
+                if (ct_len < 1u) {
+                    status = ST_ERR_BAD_REQ;
                     break;
                 }
                 nlen = pt[0];
@@ -389,8 +399,12 @@ int main(int argc, char **argv)
             case OP_SIGN_DOC: {
                 uint8_t *sig_out;
                 size_t sig_len;
-                if (require_authenticated(&session) != 0) {
+                if (session.is_authenticated != 1 || session.has_key != 1) {
                     status = ST_ERR_AUTH;
+                    break;
+                }
+                if (session.deleted == 1) {
+                    status = ST_ERR_DELETED;
                     break;
                 }
                 sig_out = NULL;
@@ -437,8 +451,10 @@ int main(int argc, char **argv)
                 break;
             }
             case OP_DELETE_KEYS:
-                if (require_authenticated(&session) != 0) {
+                if (session.is_authenticated != 1 || session.has_key != 1) {
                     status = ST_ERR_AUTH;
+                } else if (session.deleted == 1) {
+                    status = ST_ERR_DELETED;
                 } else if (ks_delete_keys(session.username) != 0) {
                     status = ST_ERR_INTERNAL;
                 } else {
