@@ -9,6 +9,7 @@
 #define AUTH_PBKDF2_ITERS 200000
 
 int auth_load_db(const char *path);
+int auth_bootstrap_from_seed_if_needed(const char *db_path, const char *seed_path);
 int auth_verify_password(const char *username, const char *password, int *must_change_out, int *deleted_out);
 int auth_change_password(const char *username, const char *old_pw, const char *new_pw);
 int auth_set_deleted(const char *username, int deleted);
