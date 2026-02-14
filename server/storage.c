@@ -4,6 +4,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
@@ -206,92 +207,41 @@ static int ks_generate_rsa_key(EVP_PKEY **pkey_out)
     return 0;
 }
 
-static int ks_encrypt_private_pem(const uint8_t *plain,
-                                  size_t plain_len,
-                                  const char *password,
-                                  uint8_t **blob_out,
-                                  size_t *blob_len_out)
+static int ks_derive_login_session_key(const char *username,
+                                       const char *password,
+                                       uint8_t key_out[32])
 {
-    uint8_t pbkdf2_salt[16];
-    uint8_t iv[KS_GCM_IV_LEN];
-    uint8_t tag[KS_GCM_TAG_LEN];
-    uint8_t key[32];
-    EVP_CIPHER_CTX *ctx;
-    uint8_t *out;
-    uint32_t ct_len_u32;
-    int len1;
-    int len2;
-    size_t off;
+    char salt[256];
 
-    if (plain == NULL || password == NULL || blob_out == NULL || blob_len_out == NULL) {
+    if (username == NULL || password == NULL || key_out == NULL) {
         return -1;
     }
-    if (plain_len > UINT32_MAX) {
+    if (snprintf(salt, sizeof(salt), "dss-session:%s", username) >= (int)sizeof(salt)) {
         return -1;
     }
 
-    if (RAND_bytes(pbkdf2_salt, sizeof(pbkdf2_salt)) != 1 ||
-        RAND_bytes(iv, sizeof(iv)) != 1) {
+    if (PKCS5_PBKDF2_HMAC(password,
+                          (int)strlen(password),
+                          (const uint8_t *)salt,
+                          (int)strlen(salt),
+                          KS_PBKDF2_ITERS,
+                          EVP_sha256(),
+                          32,
+                          key_out) != 1) {
         return -1;
     }
 
-    if (ks_pbkdf2_key(password, pbkdf2_salt, key) != 0) {
-        return -1;
-    }
-
-    out = malloc(KS_PRIV_HDR_LEN + plain_len);
-    if (out == NULL) {
-        return -1;
-    }
-
-    memcpy(out, KS_MAGIC, 4u);
-    out[4] = KS_VERSION;
-    memcpy(out + 5u, pbkdf2_salt, sizeof(pbkdf2_salt));
-    memcpy(out + 21u, iv, sizeof(iv));
-    memset(out + 33u, 0, KS_GCM_TAG_LEN);
-
-    ctx = EVP_CIPHER_CTX_new();
-    if (ctx == NULL) {
-        free(out);
-        return -1;
-    }
-
-    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) != 1 ||
-        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, KS_GCM_IV_LEN, NULL) != 1 ||
-        EVP_EncryptInit_ex(ctx, NULL, NULL, key, iv) != 1 ||
-        EVP_EncryptUpdate(ctx, out + KS_PRIV_HDR_LEN, &len1, plain, (int)plain_len) != 1 ||
-        EVP_EncryptFinal_ex(ctx, out + KS_PRIV_HDR_LEN + len1, &len2) != 1 ||
-        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, KS_GCM_TAG_LEN, tag) != 1) {
-        EVP_CIPHER_CTX_free(ctx);
-        free(out);
-        return -1;
-    }
-
-    EVP_CIPHER_CTX_free(ctx);
-
-    ct_len_u32 = (uint32_t)(len1 + len2);
-    memcpy(out + 33u, tag, KS_GCM_TAG_LEN);
-    off = 49u;
-    out[off] = (uint8_t)((ct_len_u32 >> 24) & 0xffu);
-    out[off + 1u] = (uint8_t)((ct_len_u32 >> 16) & 0xffu);
-    out[off + 2u] = (uint8_t)((ct_len_u32 >> 8) & 0xffu);
-    out[off + 3u] = (uint8_t)(ct_len_u32 & 0xffu);
-
-    *blob_out = out;
-    *blob_len_out = KS_PRIV_HDR_LEN + (size_t)ct_len_u32;
     return 0;
 }
 
-static int ks_decrypt_private_blob(const uint8_t *blob,
-                                   size_t blob_len,
-                                   const char *password,
-                                   uint8_t **plain_out,
-                                   size_t *plain_len_out)
+static int ks_decrypt_private_blob_with_key(const uint8_t *blob,
+                                            size_t blob_len,
+                                            const uint8_t key[32],
+                                            uint8_t **plain_out,
+                                            size_t *plain_len_out)
 {
-    uint8_t pbkdf2_salt[16];
     uint8_t iv[KS_GCM_IV_LEN];
     uint8_t tag[KS_GCM_TAG_LEN];
-    uint8_t key[32];
     uint32_t ct_len_u32;
     const uint8_t *ct;
     EVP_CIPHER_CTX *ctx;
@@ -299,17 +249,16 @@ static int ks_decrypt_private_blob(const uint8_t *blob,
     int len1;
     int len2;
 
-    if (blob == NULL || password == NULL || plain_out == NULL || plain_len_out == NULL) {
+    if (blob == NULL || key == NULL || plain_out == NULL || plain_len_out == NULL) {
         return -1;
     }
     if (blob_len < KS_PRIV_HDR_LEN) {
         return -1;
     }
-    if (memcmp(blob, KS_MAGIC, 4u) != 0 || blob[4] != KS_VERSION) {
+    if (memcmp(blob, KS_MAGIC, 4u) != 0) {
         return -1;
     }
 
-    memcpy(pbkdf2_salt, blob + 5u, sizeof(pbkdf2_salt));
     memcpy(iv, blob + 21u, sizeof(iv));
     memcpy(tag, blob + 33u, sizeof(tag));
 
@@ -323,10 +272,6 @@ static int ks_decrypt_private_blob(const uint8_t *blob,
     }
 
     ct = blob + KS_PRIV_HDR_LEN;
-
-    if (ks_pbkdf2_key(password, pbkdf2_salt, key) != 0) {
-        return -1;
-    }
 
     plain = malloc((size_t)ct_len_u32 + 1u);
     if (plain == NULL) {
@@ -358,7 +303,111 @@ static int ks_decrypt_private_blob(const uint8_t *blob,
     return 0;
 }
 
-int ks_create_keys(const char *username, const char *password)
+static int ks_encrypt_private_pem_with_key(const uint8_t *plain,
+                                           size_t plain_len,
+                                           const uint8_t key[32],
+                                           uint8_t **blob_out,
+                                           size_t *blob_len_out)
+{
+    uint8_t salt[16];
+    uint8_t iv[KS_GCM_IV_LEN];
+    uint8_t tag[KS_GCM_TAG_LEN];
+    EVP_CIPHER_CTX *ctx;
+    uint8_t *out;
+    uint32_t ct_len_u32;
+    int len1;
+    int len2;
+
+    if (plain == NULL || key == NULL || blob_out == NULL || blob_len_out == NULL) {
+        return -1;
+    }
+    if (plain_len > UINT32_MAX) {
+        return -1;
+    }
+
+    if (RAND_bytes(salt, sizeof(salt)) != 1 || RAND_bytes(iv, sizeof(iv)) != 1) {
+        return -1;
+    }
+
+    out = malloc(KS_PRIV_HDR_LEN + plain_len);
+    if (out == NULL) {
+        return -1;
+    }
+
+    memcpy(out, KS_MAGIC, 4u);
+    out[4] = 2u;
+    memcpy(out + 5u, salt, sizeof(salt));
+    memcpy(out + 21u, iv, sizeof(iv));
+    memset(out + 33u, 0, KS_GCM_TAG_LEN);
+
+    ctx = EVP_CIPHER_CTX_new();
+    if (ctx == NULL) {
+        free(out);
+        return -1;
+    }
+
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL) != 1 ||
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, KS_GCM_IV_LEN, NULL) != 1 ||
+        EVP_EncryptInit_ex(ctx, NULL, NULL, key, iv) != 1 ||
+        EVP_EncryptUpdate(ctx, out + KS_PRIV_HDR_LEN, &len1, plain, (int)plain_len) != 1 ||
+        EVP_EncryptFinal_ex(ctx, out + KS_PRIV_HDR_LEN + len1, &len2) != 1 ||
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, KS_GCM_TAG_LEN, tag) != 1) {
+        EVP_CIPHER_CTX_free(ctx);
+        free(out);
+        return -1;
+    }
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    ct_len_u32 = (uint32_t)(len1 + len2);
+    memcpy(out + 33u, tag, KS_GCM_TAG_LEN);
+    out[49u] = (uint8_t)((ct_len_u32 >> 24) & 0xffu);
+    out[50u] = (uint8_t)((ct_len_u32 >> 16) & 0xffu);
+    out[51u] = (uint8_t)((ct_len_u32 >> 8) & 0xffu);
+    out[52u] = (uint8_t)(ct_len_u32 & 0xffu);
+
+    *blob_out = out;
+    *blob_len_out = KS_PRIV_HDR_LEN + (size_t)ct_len_u32;
+    return 0;
+}
+
+int ks_derive_session_key(const char *username,
+                          const char *password,
+                          uint8_t key_out[32])
+{
+    char user_dir[PATH_MAX];
+    char pub_path[PATH_MAX];
+    char enc_path[PATH_MAX];
+    uint8_t *blob;
+    size_t blob_len;
+
+    blob = NULL;
+    if (ks_derive_login_session_key(username, password, key_out) != 0) {
+        return -1;
+    }
+
+    if (ks_build_user_paths(username, user_dir, pub_path, enc_path) != 0) {
+        return -1;
+    }
+    (void)user_dir;
+    (void)pub_path;
+
+    if (ks_read_all(enc_path, &blob, &blob_len) != 0) {
+        return 0;
+    }
+
+    if (blob_len >= KS_PRIV_HDR_LEN && memcmp(blob, KS_MAGIC, 4u) == 0 && blob[4] == KS_VERSION) {
+        if (ks_pbkdf2_key(password, blob + 5u, key_out) != 0) {
+            free(blob);
+            return -1;
+        }
+    }
+
+    free(blob);
+    return 0;
+}
+
+int ks_create_keys_session(const char *username, const uint8_t session_key[32])
 {
     char user_dir[PATH_MAX];
     char pub_path[PATH_MAX];
@@ -371,8 +420,6 @@ int ks_create_keys(const char *username, const char *password)
     uint8_t *enc_blob;
     size_t enc_blob_len;
     BUF_MEM *bptr;
-    int must_change;
-    int deleted;
 
     pkey = NULL;
     priv_bio = NULL;
@@ -380,15 +427,7 @@ int ks_create_keys(const char *username, const char *password)
     priv_pem = NULL;
     enc_blob = NULL;
 
-    if (username == NULL || password == NULL) {
-        return -1;
-    }
-
-    if (auth_verify_password(username, password, &must_change, &deleted) != 0) {
-        return -1;
-    }
-    (void)must_change;
-    if (deleted == 1) {
+    if (username == NULL || session_key == NULL) {
         return -1;
     }
 
@@ -396,7 +435,6 @@ int ks_create_keys(const char *username, const char *password)
         return -1;
     }
 
-    /* If both key files already exist, treat creation as an idempotent no-op. */
     if (ks_file_exists(pub_path) && ks_file_exists(enc_path)) {
         return 0;
     }
@@ -444,7 +482,7 @@ int ks_create_keys(const char *username, const char *password)
     memcpy(priv_pem, bptr->data, bptr->length);
     priv_len = bptr->length;
 
-    if (ks_encrypt_private_pem(priv_pem, priv_len, password, &enc_blob, &enc_blob_len) != 0) {
+    if (ks_encrypt_private_pem_with_key(priv_pem, priv_len, session_key, &enc_blob, &enc_blob_len) != 0) {
         goto cleanup;
     }
 
@@ -490,9 +528,10 @@ int ks_get_public(const char *username, uint8_t **pem, size_t *pem_len)
     return ks_read_all(pub_path, pem, pem_len);
 }
 
-int ks_sign_doc(const char *username, const char *password,
-                const uint8_t *doc, size_t doc_len,
-                uint8_t **sig, size_t *sig_len)
+int ks_sign_doc_session(const char *username,
+                        const uint8_t session_key[32],
+                        const uint8_t *doc, size_t doc_len,
+                        uint8_t **sig, size_t *sig_len)
 {
     char user_dir[PATH_MAX];
     char pub_path[PATH_MAX];
@@ -507,8 +546,6 @@ int ks_sign_doc(const char *username, const char *password,
     size_t out_len;
     uint8_t *out_sig;
     EVP_PKEY_CTX *pctx;
-    int must_change;
-    int deleted;
 
     enc_blob = NULL;
     priv_pem = NULL;
@@ -517,15 +554,7 @@ int ks_sign_doc(const char *username, const char *password,
     mdctx = NULL;
     out_sig = NULL;
 
-    if (username == NULL || password == NULL || doc == NULL || sig == NULL || sig_len == NULL) {
-        return -1;
-    }
-
-    if (auth_verify_password(username, password, &must_change, &deleted) != 0) {
-        return -1;
-    }
-    (void)must_change;
-    if (deleted == 1) {
+    if (username == NULL || session_key == NULL || doc == NULL || sig == NULL || sig_len == NULL) {
         return -1;
     }
 
@@ -540,8 +569,7 @@ int ks_sign_doc(const char *username, const char *password,
         return -1;
     }
 
-    /* Decryption/authentication failure indicates the wrong password or tampered data. */
-    if (ks_decrypt_private_blob(enc_blob, enc_blob_len, password, &priv_pem, &priv_pem_len) != 0) {
+    if (ks_decrypt_private_blob_with_key(enc_blob, enc_blob_len, session_key, &priv_pem, &priv_pem_len) != 0) {
         free(enc_blob);
         return -1;
     }
@@ -609,6 +637,34 @@ int ks_sign_doc(const char *username, const char *password,
     return 0;
 }
 
+int ks_create_keys(const char *username, const char *password)
+{
+    uint8_t session_key[32];
+    int rc;
+
+    if (ks_derive_session_key(username, password, session_key) != 0) {
+        return -1;
+    }
+    rc = ks_create_keys_session(username, session_key);
+    OPENSSL_cleanse(session_key, sizeof(session_key));
+    return rc;
+}
+
+int ks_sign_doc(const char *username, const char *password,
+                const uint8_t *doc, size_t doc_len,
+                uint8_t **sig, size_t *sig_len)
+{
+    uint8_t session_key[32];
+    int rc;
+
+    if (ks_derive_session_key(username, password, session_key) != 0) {
+        return -1;
+    }
+    rc = ks_sign_doc_session(username, session_key, doc, doc_len, sig, sig_len);
+    OPENSSL_cleanse(session_key, sizeof(session_key));
+    return rc;
+}
+
 int ks_delete_keys(const char *username)
 {
     char user_dir[PATH_MAX];
@@ -642,5 +698,58 @@ int ks_delete_keys(const char *username)
         return -1;
     }
 
+    return 0;
+}
+
+int ks_reencrypt_private_for_new_session_key(const char *username,
+                                             const uint8_t old_session_key[32],
+                                             const uint8_t new_session_key[32])
+{
+    char user_dir[PATH_MAX];
+    char pub_path[PATH_MAX];
+    char enc_path[PATH_MAX];
+    uint8_t *enc_blob;
+    size_t enc_blob_len;
+    uint8_t *priv_pem;
+    size_t priv_pem_len;
+    uint8_t *new_blob;
+    size_t new_blob_len;
+
+    enc_blob = NULL;
+    priv_pem = NULL;
+    new_blob = NULL;
+
+    if (username == NULL || old_session_key == NULL || new_session_key == NULL) {
+        return -1;
+    }
+
+    if (ks_build_user_paths(username, user_dir, pub_path, enc_path) != 0) {
+        return -1;
+    }
+    (void)user_dir;
+    (void)pub_path;
+
+    if (ks_read_all(enc_path, &enc_blob, &enc_blob_len) != 0) {
+        return 0;
+    }
+
+    if (ks_decrypt_private_blob_with_key(enc_blob, enc_blob_len, old_session_key, &priv_pem, &priv_pem_len) != 0) {
+        free(enc_blob);
+        return -1;
+    }
+    free(enc_blob);
+
+    if (ks_encrypt_private_pem_with_key(priv_pem, priv_pem_len, new_session_key, &new_blob, &new_blob_len) != 0) {
+        free(priv_pem);
+        return -1;
+    }
+    free(priv_pem);
+
+    if (ks_write_all(enc_path, new_blob, new_blob_len) != 0) {
+        free(new_blob);
+        return -1;
+    }
+
+    free(new_blob);
     return 0;
 }
