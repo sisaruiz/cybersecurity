@@ -1,4 +1,5 @@
 #include "../common/dsspacket.h"
+#include "../common/handshake.h"
 #include "../common/net.h"
 #include "../common/replay.h"
 #include "../common/securechan.h"
@@ -12,7 +13,7 @@
 #include <unistd.h>
 
 static int send_encrypted_pong(int fd,
-                               const uint8_t session_key[GCM_KEY_LEN],
+                               const uint8_t key_out[32],
                                const uint8_t req_nonce[REQ_NONCE_LEN],
                                const char *message)
 {
@@ -56,7 +57,7 @@ static int send_encrypted_pong(int fd,
         return -1;
     }
 
-    if (sc_aead_encrypt(session_key, iv,
+    if (sc_aead_encrypt(key_out, iv,
                         aad, aad_len,
                         (const uint8_t *)message, pt_len,
                         ct, tag) != 0) {
@@ -80,17 +81,37 @@ int main(int argc, char **argv)
     int client_fd;
     ReplayCache cache;
     int rc;
-    const uint8_t session_key[GCM_KEY_LEN] = {
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-        0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
-        0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
-    };
+    uint8_t c2s_key[32];
+    uint8_t s2c_key[32];
+    uint8_t key_in[32];
+    uint8_t key_out[32];
+    uint8_t *client_pub;
+    size_t client_pub_len;
+    uint8_t *server_pub;
+    size_t server_pub_len;
+    EVP_PKEY *server_ecdh_priv;
+    uint8_t *shared_secret;
+    size_t shared_secret_len;
+    uint8_t *transcript;
+    size_t transcript_len;
+    uint8_t *sig;
+    size_t sig_len;
 
     port = (argc > 1) ? argv[1] : "9000";
     listen_fd = -1;
     client_fd = -1;
     memset(&cache, 0, sizeof(cache));
+    client_pub = NULL;
+    client_pub_len = 0;
+    server_pub = NULL;
+    server_pub_len = 0;
+    server_ecdh_priv = NULL;
+    shared_secret = NULL;
+    shared_secret_len = 0;
+    transcript = NULL;
+    transcript_len = 0;
+    sig = NULL;
+    sig_len = 0;
 
     listen_fd = tcp_listen(port);
     if (listen_fd < 0) {
@@ -105,12 +126,63 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    /* Perform ECDH handshake and derive directional session keys. */
+    if (hs_recv_chlo(client_fd, &client_pub, &client_pub_len) != 0) {
+        fprintf(stderr, "hs_recv_chlo failed\n");
+        goto cleanup;
+    }
+
+    if (hs_gen_ecdh_keypair(&server_pub, &server_pub_len, &server_ecdh_priv) != 0) {
+        fprintf(stderr, "hs_gen_ecdh_keypair failed\n");
+        goto cleanup;
+    }
+
+    if (client_pub_len > SIZE_MAX - server_pub_len) {
+        fprintf(stderr, "transcript length overflow\n");
+        goto cleanup;
+    }
+
+    transcript_len = client_pub_len + server_pub_len;
+    transcript = malloc(transcript_len);
+    if (transcript == NULL) {
+        fprintf(stderr, "transcript allocation failed\n");
+        goto cleanup;
+    }
+
+    memcpy(transcript, client_pub, client_pub_len);
+    memcpy(transcript + client_pub_len, server_pub, server_pub_len);
+
+    if (hs_sign_transcript("server/res/keys/server_private.pem", transcript, transcript_len,
+                           &sig, &sig_len) != 0) {
+        fprintf(stderr, "hs_sign_transcript failed\n");
+        goto cleanup;
+    }
+
+    if (hs_send_shlo(client_fd, server_pub, server_pub_len, sig, sig_len) != 0) {
+        fprintf(stderr, "hs_send_shlo failed\n");
+        goto cleanup;
+    }
+
+    if (hs_compute_shared(server_ecdh_priv, client_pub, client_pub_len,
+                          &shared_secret, &shared_secret_len) != 0) {
+        fprintf(stderr, "hs_compute_shared failed\n");
+        goto cleanup;
+    }
+
+    if (hs_derive_keys(shared_secret, shared_secret_len,
+                       transcript, transcript_len,
+                       c2s_key, s2c_key) != 0) {
+        fprintf(stderr, "hs_derive_keys failed\n");
+        goto cleanup;
+    }
+
+    memcpy(key_in, c2s_key, sizeof(key_in));
+    memcpy(key_out, s2c_key, sizeof(key_out));
+
     rc = replay_init(&cache, 0);
     if (rc != 0) {
         fprintf(stderr, "replay_init failed\n");
-        close(client_fd);
-        close(listen_fd);
-        return 1;
+        goto cleanup;
     }
 
     /* Process one client in a simple single-threaded loop. */
@@ -165,7 +237,7 @@ int main(int argc, char **argv)
             break;
         }
 
-        if (sc_aead_decrypt(session_key, iv,
+        if (sc_aead_decrypt(key_in, iv,
                             aad, aad_len,
                             ct, ct_len,
                             tag,
@@ -181,7 +253,7 @@ int main(int argc, char **argv)
             reply_text = "UNKNOWN";
         }
 
-        if (send_encrypted_pong(client_fd, session_key, in_hdr.req_nonce, reply_text) != 0) {
+        if (send_encrypted_pong(client_fd, key_out, in_hdr.req_nonce, reply_text) != 0) {
             free(pt);
             dsspacket_free(payload);
             break;
@@ -191,6 +263,13 @@ int main(int argc, char **argv)
         dsspacket_free(payload);
     }
 
+cleanup:
+    free(sig);
+    free(transcript);
+    free(shared_secret);
+    free(server_pub);
+    free(client_pub);
+    EVP_PKEY_free(server_ecdh_priv);
     replay_free(&cache);
     close(client_fd);
     close(listen_fd);

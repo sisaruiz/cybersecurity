@@ -1,4 +1,5 @@
 #include "../common/dsspacket.h"
+#include "../common/handshake.h"
 #include "../common/net.h"
 #include "../common/securechan.h"
 
@@ -48,7 +49,7 @@ static int fill_random_nonce(uint8_t nonce[REQ_NONCE_LEN])
 }
 
 static int send_encrypted_ping(int fd,
-                               const uint8_t session_key[GCM_KEY_LEN],
+                               const uint8_t key_out[32],
                                const uint8_t req_nonce[REQ_NONCE_LEN])
 {
     dss_header_t hdr;
@@ -93,7 +94,7 @@ static int send_encrypted_ping(int fd,
         return -1;
     }
 
-    if (sc_aead_encrypt(session_key, iv,
+    if (sc_aead_encrypt(key_out, iv,
                         aad, aad_len,
                         (const uint8_t *)message, pt_len,
                         ct, tag) != 0) {
@@ -110,7 +111,7 @@ static int send_encrypted_ping(int fd,
     return 0;
 }
 
-static int recv_decrypt_and_print_pong(int fd, const uint8_t session_key[GCM_KEY_LEN])
+static int recv_decrypt_and_print_pong(int fd, const uint8_t key_in[32])
 {
     dss_header_t hdr;
     uint8_t aad[DSSPACKET_AAD_LEN];
@@ -152,7 +153,7 @@ static int recv_decrypt_and_print_pong(int fd, const uint8_t session_key[GCM_KEY
         return -1;
     }
 
-    if (sc_aead_decrypt(session_key, iv,
+    if (sc_aead_decrypt(key_in, iv,
                         aad, aad_len,
                         ct, ct_len,
                         tag,
@@ -177,15 +178,35 @@ int main(int argc, char **argv)
     const char *port;
     int fd;
     uint8_t req_nonce[REQ_NONCE_LEN];
-    const uint8_t session_key[GCM_KEY_LEN] = {
-        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-        0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-        0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
-        0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
-    };
+    uint8_t c2s_key[32];
+    uint8_t s2c_key[32];
+    uint8_t key_out[32];
+    uint8_t key_in[32];
+    uint8_t *client_pub;
+    size_t client_pub_len;
+    EVP_PKEY *client_ecdh_priv;
+    uint8_t *server_pub;
+    size_t server_pub_len;
+    uint8_t *sig;
+    size_t sig_len;
+    uint8_t *transcript;
+    size_t transcript_len;
+    uint8_t *shared_secret;
+    size_t shared_secret_len;
 
     host = (argc > 1) ? argv[1] : "127.0.0.1";
     port = (argc > 2) ? argv[2] : "9000";
+    client_pub = NULL;
+    client_pub_len = 0;
+    client_ecdh_priv = NULL;
+    server_pub = NULL;
+    server_pub_len = 0;
+    sig = NULL;
+    sig_len = 0;
+    transcript = NULL;
+    transcript_len = 0;
+    shared_secret = NULL;
+    shared_secret_len = 0;
 
     if (fill_random_nonce(req_nonce) != 0) {
         perror("fill_random_nonce");
@@ -198,32 +219,97 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* Send an initial encrypted PING with a fresh nonce. */
-    if (send_encrypted_ping(fd, session_key, req_nonce) != 0) {
-        perror("send_encrypted_ping");
-        close(fd);
-        return 1;
+    /* Perform ECDH handshake before any encrypted DSS traffic. */
+    if (hs_gen_ecdh_keypair(&client_pub, &client_pub_len, &client_ecdh_priv) != 0) {
+        fprintf(stderr, "hs_gen_ecdh_keypair failed\n");
+        goto cleanup;
     }
 
-    if (recv_decrypt_and_print_pong(fd, session_key) != 0) {
+    if (hs_send_chlo(fd, client_pub, client_pub_len) != 0) {
+        fprintf(stderr, "hs_send_chlo failed\n");
+        goto cleanup;
+    }
+
+    if (hs_recv_shlo(fd, &server_pub, &server_pub_len, &sig, &sig_len) != 0) {
+        fprintf(stderr, "hs_recv_shlo failed\n");
+        goto cleanup;
+    }
+
+    if (client_pub_len > SIZE_MAX - server_pub_len) {
+        fprintf(stderr, "transcript length overflow\n");
+        goto cleanup;
+    }
+
+    transcript_len = client_pub_len + server_pub_len;
+    transcript = malloc(transcript_len);
+    if (transcript == NULL) {
+        fprintf(stderr, "transcript allocation failed\n");
+        goto cleanup;
+    }
+
+    memcpy(transcript, client_pub, client_pub_len);
+    memcpy(transcript + client_pub_len, server_pub, server_pub_len);
+
+    if (hs_verify_transcript("client/res/server_public.pem", transcript, transcript_len,
+                             sig, sig_len) != 0) {
+        fprintf(stderr, "hs_verify_transcript failed\n");
+        goto cleanup;
+    }
+
+    if (hs_compute_shared(client_ecdh_priv, server_pub, server_pub_len,
+                          &shared_secret, &shared_secret_len) != 0) {
+        fprintf(stderr, "hs_compute_shared failed\n");
+        goto cleanup;
+    }
+
+    if (hs_derive_keys(shared_secret, shared_secret_len,
+                       transcript, transcript_len,
+                       c2s_key, s2c_key) != 0) {
+        fprintf(stderr, "hs_derive_keys failed\n");
+        goto cleanup;
+    }
+
+    memcpy(key_out, c2s_key, sizeof(key_out));
+    memcpy(key_in, s2c_key, sizeof(key_in));
+
+    /* Send an initial encrypted PING with a fresh nonce. */
+    if (send_encrypted_ping(fd, key_out, req_nonce) != 0) {
+        perror("send_encrypted_ping");
+        goto cleanup;
+    }
+
+    if (recv_decrypt_and_print_pong(fd, key_in) != 0) {
         perror("recv_decrypt_and_print_pong");
-        close(fd);
-        return 1;
+        goto cleanup;
     }
 
     /* Send the same nonce again to trigger replay detection. */
-    if (send_encrypted_ping(fd, session_key, req_nonce) != 0) {
+    if (send_encrypted_ping(fd, key_out, req_nonce) != 0) {
         perror("send_encrypted_ping");
-        close(fd);
-        return 1;
+        goto cleanup;
     }
 
-    if (recv_decrypt_and_print_pong(fd, session_key) != 0) {
+    if (recv_decrypt_and_print_pong(fd, key_in) != 0) {
         perror("recv_decrypt_and_print_pong");
-        close(fd);
-        return 1;
+        goto cleanup;
     }
 
     close(fd);
+    free(shared_secret);
+    free(transcript);
+    free(sig);
+    free(server_pub);
+    EVP_PKEY_free(client_ecdh_priv);
+    free(client_pub);
     return 0;
+
+cleanup:
+    close(fd);
+    free(shared_secret);
+    free(transcript);
+    free(sig);
+    free(server_pub);
+    EVP_PKEY_free(client_ecdh_priv);
+    free(client_pub);
+    return 1;
 }
