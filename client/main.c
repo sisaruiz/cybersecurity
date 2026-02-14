@@ -227,11 +227,13 @@ int main(int argc, char **argv)
         fprintf(stderr, "hs_send_chlo failed\n");
         goto cleanup;
     }
+    puts("Handshake: CHLO sent");
 
     if (hs_recv_shlo(fd, &server_pub, &server_pub_len, &sig, &sig_len) != 0) {
         fprintf(stderr, "hs_recv_shlo failed\n");
         goto cleanup;
     }
+    puts("Handshake: SHLO received");
 
     if (client_pub_len > SIZE_MAX - server_pub_len) {
         fprintf(stderr, "transcript length overflow\n");
@@ -250,9 +252,10 @@ int main(int argc, char **argv)
 
     if (hs_verify_transcript("client/res/server_public.pem", transcript, transcript_len,
                              sig, sig_len) != 0) {
-        fprintf(stderr, "hs_verify_transcript failed\n");
+        fprintf(stderr, "Handshake error: signature verification failed\n");
         goto cleanup;
     }
+    puts("Handshake: signature verified");
 
     if (hs_compute_shared(client_ecdh_priv, server_pub, server_pub_len,
                           &shared_secret, &shared_secret_len) != 0) {
@@ -266,6 +269,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "hs_derive_keys failed\n");
         goto cleanup;
     }
+    puts("Handshake: session keys derived");
 
     /* Send an initial encrypted PING with a fresh nonce. */
     /* key_out = c2s_key (encrypt client->server), key_in = s2c_key (decrypt server->client). */
