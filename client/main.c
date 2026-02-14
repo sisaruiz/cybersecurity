@@ -180,8 +180,6 @@ int main(int argc, char **argv)
     uint8_t req_nonce[REQ_NONCE_LEN];
     uint8_t c2s_key[32];
     uint8_t s2c_key[32];
-    uint8_t key_out[32];
-    uint8_t key_in[32];
     uint8_t *client_pub;
     size_t client_pub_len;
     EVP_PKEY *client_ecdh_priv;
@@ -269,27 +267,25 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    memcpy(key_out, c2s_key, sizeof(key_out));
-    memcpy(key_in, s2c_key, sizeof(key_in));
-
     /* Send an initial encrypted PING with a fresh nonce. */
-    if (send_encrypted_ping(fd, key_out, req_nonce) != 0) {
+    /* key_out = c2s_key (encrypt client->server), key_in = s2c_key (decrypt server->client). */
+    if (send_encrypted_ping(fd, c2s_key, req_nonce) != 0) {
         perror("send_encrypted_ping");
         goto cleanup;
     }
 
-    if (recv_decrypt_and_print_pong(fd, key_in) != 0) {
+    if (recv_decrypt_and_print_pong(fd, s2c_key) != 0) {
         perror("recv_decrypt_and_print_pong");
         goto cleanup;
     }
 
     /* Send the same nonce again to trigger replay detection. */
-    if (send_encrypted_ping(fd, key_out, req_nonce) != 0) {
+    if (send_encrypted_ping(fd, c2s_key, req_nonce) != 0) {
         perror("send_encrypted_ping");
         goto cleanup;
     }
 
-    if (recv_decrypt_and_print_pong(fd, key_in) != 0) {
+    if (recv_decrypt_and_print_pong(fd, s2c_key) != 0) {
         perror("recv_decrypt_and_print_pong");
         goto cleanup;
     }
