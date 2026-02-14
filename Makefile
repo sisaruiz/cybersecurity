@@ -2,7 +2,7 @@ CC := gcc
 CFLAGS := -Wall -Wextra -Wpedantic -O2 -g -D_POSIX_C_SOURCE=200809L -I.
 LDFLAGS := -lssl -lcrypto
 
-COMMON_SRCS := common/net.c common/dsspacket.c common/replay.c
+COMMON_SRCS := common/net.c common/dsspacket.c common/replay.c common/securechan.c
 SERVER_SRCS := server/main.c $(COMMON_SRCS)
 CLIENT_SRCS := client/main.c $(COMMON_SRCS)
 
