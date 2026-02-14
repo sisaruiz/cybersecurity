@@ -551,6 +551,28 @@ int auth_load_db(const char *path)
     return 0;
 }
 
+static int auth_apply_new_password(auth_user_t *u, const char *new_pw)
+{
+    uint8_t new_salt[AUTH_SALT_LEN];
+    uint8_t new_hash[AUTH_HASH_LEN];
+
+    if (u == NULL || new_pw == NULL) {
+        return -1;
+    }
+
+    if (RAND_bytes(new_salt, AUTH_SALT_LEN) != 1) {
+        return -1;
+    }
+    if (auth_pbkdf2(new_pw, new_salt, new_hash) != 0) {
+        return -1;
+    }
+
+    memcpy(u->salt, new_salt, AUTH_SALT_LEN);
+    memcpy(u->hash, new_hash, AUTH_HASH_LEN);
+    u->must_change = 0;
+    return 0;
+}
+
 int auth_verify_password(const char *username, const char *password, int *must_change_out, int *deleted_out)
 {
     auth_user_t *u;
@@ -587,9 +609,6 @@ int auth_change_password(const char *username, const char *old_pw, const char *n
 {
     auth_user_t *u;
     uint8_t old_hash[AUTH_HASH_LEN];
-    uint8_t new_salt[AUTH_SALT_LEN];
-    uint8_t new_hash[AUTH_HASH_LEN];
-
     if (username == NULL || old_pw == NULL || new_pw == NULL || g_db_path == NULL) {
         return -1;
     }
@@ -606,16 +625,33 @@ int auth_change_password(const char *username, const char *old_pw, const char *n
         return -1;
     }
 
-    if (RAND_bytes(new_salt, AUTH_SALT_LEN) != 1) {
-        return -1;
-    }
-    if (auth_pbkdf2(new_pw, new_salt, new_hash) != 0) {
+    if (auth_apply_new_password(u, new_pw) != 0) {
         return -1;
     }
 
-    memcpy(u->salt, new_salt, AUTH_SALT_LEN);
-    memcpy(u->hash, new_hash, AUTH_HASH_LEN);
-    u->must_change = 0;
+    if (auth_write_db(g_db_path) != 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+int auth_change_password_authenticated(const char *username, const char *new_pw)
+{
+    auth_user_t *u;
+
+    if (username == NULL || new_pw == NULL || g_db_path == NULL) {
+        return -1;
+    }
+
+    u = auth_find_user(username);
+    if (u == NULL) {
+        return -1;
+    }
+
+    if (auth_apply_new_password(u, new_pw) != 0) {
+        return -1;
+    }
 
     if (auth_write_db(g_db_path) != 0) {
         return -1;

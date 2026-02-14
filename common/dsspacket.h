@@ -8,12 +8,24 @@
 #define DSSPACKET_AAD_LEN 21u
 
 typedef enum dss_opcode {
+    OP_AUTH = 0,
     OP_CHANGE_PASSWORD = 1,
     OP_CREATE_KEYS = 2,
     OP_SIGN_DOC = 3,
     OP_GET_PUBLIC_KEY = 4,
     OP_DELETE_KEYS = 5,
+    OP_LOGOUT = 6,
 } dss_opcode_t;
+
+/*
+ * OP_AUTH request payload format:
+ *   u8 username_len | username bytes | u8 password_len | password bytes
+ *
+ * OP_AUTH response data format:
+ *   u8 must_change_flag | u8 deleted_flag
+ *
+ * The request nonce and response header format remain unchanged.
+ */
 
 typedef enum dss_status {
     ST_OK = 0,
