@@ -131,6 +131,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "hs_recv_chlo failed\n");
         goto cleanup;
     }
+    puts("Handshake: CHLO received");
 
     if (hs_gen_ecdh_keypair(&server_pub, &server_pub_len, &server_ecdh_priv) != 0) {
         fprintf(stderr, "hs_gen_ecdh_keypair failed\n");
@@ -157,11 +158,13 @@ int main(int argc, char **argv)
         fprintf(stderr, "hs_sign_transcript failed\n");
         goto cleanup;
     }
+    puts("Handshake: transcript signed");
 
     if (hs_send_shlo(client_fd, server_pub, server_pub_len, sig, sig_len) != 0) {
         fprintf(stderr, "hs_send_shlo failed\n");
         goto cleanup;
     }
+    puts("Handshake: SHLO sent");
 
     if (hs_compute_shared(server_ecdh_priv, client_pub, client_pub_len,
                           &shared_secret, &shared_secret_len) != 0) {
@@ -175,6 +178,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "hs_derive_keys failed\n");
         goto cleanup;
     }
+    puts("Handshake: session keys derived");
 
     memcpy(key_in, c2s_key, sizeof(key_in));
     memcpy(key_out, s2c_key, sizeof(key_out));
