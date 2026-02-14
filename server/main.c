@@ -367,10 +367,23 @@ int main(int argc, char **argv)
                     status = ST_ERR_AUTH;
                 } else if (session.deleted != 0) {
                     status = ST_ERR_DELETED;
-                } else if (ks_create_keys_session(session.username, session.key) != 0) {
-                    status = ST_ERR_INTERNAL;
                 } else {
-                    status = ST_OK;
+                    int deleted = 0;
+
+                    /*
+                     * Enforce tombstones from both session and auth DB state so
+                     * key recreation is blocked even within the same connection.
+                     */
+                    if (auth_get_deleted(session.username, &deleted) != 0) {
+                        status = ST_ERR_INTERNAL;
+                    } else if (deleted != 0) {
+                        session.deleted = 1;
+                        status = ST_ERR_DELETED;
+                    } else if (ks_create_keys_session(session.username, session.key) != 0) {
+                        status = ST_ERR_INTERNAL;
+                    } else {
+                        status = ST_OK;
+                    }
                 }
                 break;
             case OP_SIGN_DOC: {
@@ -429,6 +442,10 @@ int main(int argc, char **argv)
                 } else if (ks_delete_keys(session.username) != 0) {
                     status = ST_ERR_INTERNAL;
                 } else {
+                    /*
+                     * Keep this session aligned with the persisted tombstone so
+                     * further key creation requests are rejected immediately.
+                     */
                     session.deleted = 1;
                     status = ST_OK;
                 }
