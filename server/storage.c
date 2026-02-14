@@ -407,7 +407,7 @@ int ks_derive_session_key(const char *username,
     return 0;
 }
 
-int ks_create_keys_session(const char *username, const uint8_t session_key[32])
+int ks_create_keys_session(const char *username, const uint8_t user_wrap_key[32])
 {
     char user_dir[PATH_MAX];
     char pub_path[PATH_MAX];
@@ -427,7 +427,7 @@ int ks_create_keys_session(const char *username, const uint8_t session_key[32])
     priv_pem = NULL;
     enc_blob = NULL;
 
-    if (username == NULL || session_key == NULL) {
+    if (username == NULL || user_wrap_key == NULL) {
         return -1;
     }
 
@@ -482,7 +482,7 @@ int ks_create_keys_session(const char *username, const uint8_t session_key[32])
     memcpy(priv_pem, bptr->data, bptr->length);
     priv_len = bptr->length;
 
-    if (ks_encrypt_private_pem_with_key(priv_pem, priv_len, session_key, &enc_blob, &enc_blob_len) != 0) {
+    if (ks_encrypt_private_pem_with_key(priv_pem, priv_len, user_wrap_key, &enc_blob, &enc_blob_len) != 0) {
         goto cleanup;
     }
 
@@ -529,7 +529,7 @@ int ks_get_public(const char *username, uint8_t **pem, size_t *pem_len)
 }
 
 int ks_sign_doc_session(const char *username,
-                        const uint8_t session_key[32],
+                        const uint8_t user_wrap_key[32],
                         const uint8_t *doc, size_t doc_len,
                         uint8_t **sig, size_t *sig_len)
 {
@@ -554,7 +554,7 @@ int ks_sign_doc_session(const char *username,
     mdctx = NULL;
     out_sig = NULL;
 
-    if (username == NULL || session_key == NULL || doc == NULL || sig == NULL || sig_len == NULL) {
+    if (username == NULL || user_wrap_key == NULL || doc == NULL || sig == NULL || sig_len == NULL) {
         return -1;
     }
 
@@ -569,7 +569,7 @@ int ks_sign_doc_session(const char *username,
         return -1;
     }
 
-    if (ks_decrypt_private_blob_with_key(enc_blob, enc_blob_len, session_key, &priv_pem, &priv_pem_len) != 0) {
+    if (ks_decrypt_private_blob_with_key(enc_blob, enc_blob_len, user_wrap_key, &priv_pem, &priv_pem_len) != 0) {
         free(enc_blob);
         return -1;
     }
