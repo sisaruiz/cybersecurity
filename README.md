@@ -13,3 +13,23 @@ openssl genpkey -algorithm RSA -out server/res/keys/server-private.pem -pkeyopt 
 ```bash
 openssl rsa -pubout -in server/res/keys/server-private.pem -out client/res/server-public.pem
 ```
+
+
+## Manual tests
+
+Example interactive flow in the client:
+
+```text
+login <user>
+changepw
+createkeys
+signdoc server/res/testdocs/doc1.txt
+deletekeys
+signdoc server/res/testdocs/doc1.txt
+```
+
+After `deletekeys`, the final `signdoc` must be refused with:
+
+```text
+Operation refused: keys deleted (tombstone). Re-registration required.
+```
