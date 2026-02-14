@@ -43,6 +43,14 @@ static const char *status_to_string(dss_status_t st)
     }
 }
 
+static void print_command_failure(const char *command, dss_status_t st, const cli_state_t *state)
+{
+    printf("%s failed: %s\n", command, status_to_string(st));
+    if (st == ST_ERR_AUTH && state != NULL && state->must_change == 1) {
+        puts("Hint: run 'changepw' first.");
+    }
+}
+
 static void trim_newline(char *s)
 {
     size_t n;
@@ -490,6 +498,9 @@ int main(int argc, char **argv)
                        state.username,
                        state.must_change,
                        state.deleted);
+                if (state.must_change == 1) {
+                    puts("Password change required before using other operations.");
+                }
             } else {
                 printf("login failed: %s\n", status_to_string(st));
             }
@@ -541,7 +552,7 @@ int main(int argc, char **argv)
                 state.must_change = 0;
                 puts("password changed");
             } else {
-                printf("changepw failed: %s\n", status_to_string(st));
+                print_command_failure("changepw", st, &state);
             }
             free(resp);
         } else if (strcmp(cmd, "createkeys") == 0) {
@@ -566,7 +577,7 @@ int main(int argc, char **argv)
             if (st == ST_OK) {
                 puts("keys created");
             } else {
-                printf("createkeys failed: %s\n", status_to_string(st));
+                print_command_failure("createkeys", st, &state);
             }
             free(resp);
         } else if (strcmp(cmd, "signdoc") == 0) {
@@ -611,7 +622,7 @@ int main(int argc, char **argv)
                 }
                 fputc('\n', stdout);
             } else {
-                printf("signdoc failed: %s\n", status_to_string(st));
+                print_command_failure("signdoc", st, &state);
             }
             free(resp);
         } else if (strcmp(cmd, "getpub") == 0) {
@@ -658,7 +669,7 @@ int main(int argc, char **argv)
                     fputc('\n', stdout);
                 }
             } else {
-                printf("getpub failed: %s\n", status_to_string(st));
+                print_command_failure("getpub", st, &state);
             }
             free(resp);
         } else if (strcmp(cmd, "deletekeys") == 0) {
@@ -684,7 +695,7 @@ int main(int argc, char **argv)
                 state.deleted = 1;
                 puts("keys deleted");
             } else {
-                printf("deletekeys failed: %s\n", status_to_string(st));
+                print_command_failure("deletekeys", st, &state);
             }
             free(resp);
         } else if (strcmp(cmd, "logout") == 0) {
@@ -711,7 +722,7 @@ int main(int argc, char **argv)
                 memset(&state, 0, sizeof(state));
                 puts("logged out");
             } else {
-                printf("logout failed: %s\n", status_to_string(st));
+                print_command_failure("logout", st, &state);
             }
             free(resp);
         } else {
