@@ -5,10 +5,11 @@ LDFLAGS := -lssl -lcrypto
 COMMON_SRCS := common/net.c common/dsspacket.c common/replay.c common/securechan.c common/handshake.c
 SERVER_SRCS := server/main.c server/auth.c server/storage.c $(COMMON_SRCS)
 CLIENT_SRCS := client/main.c $(COMMON_SRCS)
+USER_BOOTSTRAP_SRCS := server/user_bootstrap.c server/auth.c
 
 .PHONY: all clean
 
-all: server/dss_server client/dss_client
+all: server/dss_server client/dss_client user_bootstrap
 
 server/dss_server: $(SERVER_SRCS)
 	$(CC) $(CFLAGS) -o $@ $(SERVER_SRCS) $(LDFLAGS)
@@ -16,5 +17,8 @@ server/dss_server: $(SERVER_SRCS)
 client/dss_client: $(CLIENT_SRCS)
 	$(CC) $(CFLAGS) -o $@ $(CLIENT_SRCS) $(LDFLAGS)
 
+user_bootstrap: $(USER_BOOTSTRAP_SRCS)
+	$(CC) $(CFLAGS) -o server/user_bootstrap $(USER_BOOTSTRAP_SRCS) $(LDFLAGS)
+
 clean:
-	rm -f server/dss_server client/dss_client
+	rm -f server/dss_server client/dss_client server/user_bootstrap

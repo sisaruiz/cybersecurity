@@ -327,24 +327,23 @@ static int auth_make_seed_path(const char *db_path, const char *suffix, char **o
     return 0;
 }
 
-static int auth_bootstrap_from_seed(const char *db_path)
+int auth_bootstrap_from_seed_if_needed(const char *db_path, const char *seed_path)
 {
-    char *seed_path;
     char *consumed_path;
     FILE *seed;
     FILE *db;
     char line[AUTH_LINE_MAX];
     int rc;
 
-    seed_path = NULL;
     consumed_path = NULL;
     seed = NULL;
     db = NULL;
     rc = -1;
 
-    if (auth_make_seed_path(db_path, ".seed", &seed_path) != 0) {
+    if (db_path == NULL || seed_path == NULL) {
         goto cleanup;
     }
+
     if (auth_make_seed_path(db_path, ".seed.consumed", &consumed_path) != 0) {
         goto cleanup;
     }
@@ -457,11 +456,24 @@ cleanup:
     if (seed != NULL) {
         fclose(seed);
     }
-    if (rc != 0) {
+    if (rc != 0 && db_path != NULL) {
         unlink(db_path);
     }
-    free(seed_path);
     free(consumed_path);
+    return rc;
+}
+
+static int auth_bootstrap_from_seed(const char *db_path)
+{
+    char *seed_path;
+    int rc;
+
+    if (auth_make_seed_path(db_path, ".seed", &seed_path) != 0) {
+        return -1;
+    }
+
+    rc = auth_bootstrap_from_seed_if_needed(db_path, seed_path);
+    free(seed_path);
     return rc;
 }
 
