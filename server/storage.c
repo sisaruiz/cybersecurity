@@ -431,6 +431,16 @@ int ks_create_keys_session(const char *username, const uint8_t user_wrap_key[32]
         return -1;
     }
 
+    {
+        int deleted;
+        if (auth_get_deleted(username, &deleted) != 0) {
+            return -1;
+        }
+        if (deleted != 0) {
+            return -1;
+        }
+    }
+
     if (ks_build_user_paths(username, user_dir, pub_path, enc_path) != 0) {
         return -1;
     }
@@ -640,7 +650,12 @@ int ks_sign_doc_session(const char *username,
 int ks_create_keys(const char *username, const char *password)
 {
     uint8_t session_key[32];
+    int deleted;
     int rc;
+
+    if (auth_get_deleted(username, &deleted) != 0 || deleted != 0) {
+        return -1;
+    }
 
     if (ks_derive_session_key(username, password, session_key) != 0) {
         return -1;
@@ -679,6 +694,15 @@ int ks_delete_keys(const char *username)
         return -1;
     }
 
+    /*
+     * Project spec tombstone requirement: once key deletion is requested,
+     * the account must be marked deleted in server/res/users.db so key
+     * creation stays blocked even if key files are removed or already gone.
+     */
+    if (auth_set_deleted(username, 1) != 0) {
+        return -1;
+    }
+
     if (ks_file_exists(pub_path)) {
         if (unlink(pub_path) != 0) {
             return -1;
@@ -691,10 +715,6 @@ int ks_delete_keys(const char *username)
     }
 
     if (rmdir(user_dir) != 0 && errno != ENOENT && errno != ENOTEMPTY) {
-        return -1;
-    }
-
-    if (auth_set_deleted(username, 1) != 0) {
         return -1;
     }
 

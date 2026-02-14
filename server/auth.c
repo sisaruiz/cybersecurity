@@ -660,6 +660,23 @@ int auth_change_password_authenticated(const char *username, const char *new_pw)
     return 0;
 }
 
+int auth_get_deleted(const char *username, int *deleted_out)
+{
+    auth_user_t *u;
+
+    if (username == NULL || deleted_out == NULL) {
+        return -1;
+    }
+
+    u = auth_find_user(username);
+    if (u == NULL) {
+        return -1;
+    }
+
+    *deleted_out = u->deleted;
+    return 0;
+}
+
 int auth_set_deleted(const char *username, int deleted)
 {
     auth_user_t *u;
