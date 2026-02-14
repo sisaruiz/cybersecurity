@@ -1,6 +1,7 @@
 #include "auth.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -283,6 +284,13 @@ static int auth_write_db(const char *path)
             free(tmp_path);
             return -1;
         }
+    }
+
+    if (fflush(fp) != 0 || fsync(fileno(fp)) != 0) {
+        fclose(fp);
+        unlink(tmp_path);
+        free(tmp_path);
+        return -1;
     }
 
     if (fclose(fp) != 0) {
@@ -693,10 +701,14 @@ int auth_set_deleted(const char *username, int deleted)
         return -1;
     }
 
-    u->deleted = deleted;
+    {
+        int old_deleted = u->deleted;
 
-    if (auth_write_db(g_db_path) != 0) {
-        return -1;
+        u->deleted = deleted;
+        if (auth_write_db(g_db_path) != 0) {
+            u->deleted = old_deleted;
+            return -1;
+        }
     }
 
     return 0;
