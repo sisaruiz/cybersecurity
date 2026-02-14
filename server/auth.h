@@ -14,6 +14,7 @@ int auth_verify_password(const char *username, const char *password, int *must_c
 int auth_change_password(const char *username, const char *old_pw, const char *new_pw);
 int auth_change_password_authenticated(const char *username, const char *new_pw);
 int auth_set_deleted(const char *username, int deleted);
+int auth_get_deleted(const char *username, int *deleted_out);
 
 int auth_hex_encode(const uint8_t *in, size_t in_len, char *out, size_t out_len);
 int auth_hex_decode(const char *in, uint8_t *out, size_t out_len);

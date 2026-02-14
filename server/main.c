@@ -363,8 +363,10 @@ int main(int argc, char **argv)
                 break;
             }
             case OP_CREATE_KEYS:
-                if (require_authenticated(&session) != 0) {
+                if (session.is_authenticated != 1 || session.has_key != 1) {
                     status = ST_ERR_AUTH;
+                } else if (session.deleted != 0) {
+                    status = ST_ERR_DELETED;
                 } else if (ks_create_keys_session(session.username, session.key) != 0) {
                     status = ST_ERR_INTERNAL;
                 } else {
@@ -427,6 +429,7 @@ int main(int argc, char **argv)
                 } else if (ks_delete_keys(session.username) != 0) {
                     status = ST_ERR_INTERNAL;
                 } else {
+                    session.deleted = 1;
                     status = ST_OK;
                 }
                 break;
