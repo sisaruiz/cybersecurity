@@ -6,8 +6,9 @@ COMMON_SRCS := common/net.c common/dsspacket.c common/replay.c common/securechan
 SERVER_SRCS := server/main.c server/auth.c server/storage.c $(COMMON_SRCS)
 CLIENT_SRCS := client/main.c $(COMMON_SRCS)
 USER_BOOTSTRAP_SRCS := server/user_bootstrap.c server/auth.c
+KS_TEST_SRCS := server/ks_test.c server/auth.c server/storage.c
 
-.PHONY: all clean
+.PHONY: all clean ks_test
 
 all: server/dss_server client/dss_client user_bootstrap
 
@@ -20,5 +21,8 @@ client/dss_client: $(CLIENT_SRCS)
 user_bootstrap: $(USER_BOOTSTRAP_SRCS)
 	$(CC) $(CFLAGS) -o server/user_bootstrap $(USER_BOOTSTRAP_SRCS) $(LDFLAGS)
 
+ks_test: $(KS_TEST_SRCS)
+	$(CC) $(CFLAGS) -o server/ks_test $(KS_TEST_SRCS) $(LDFLAGS)
+
 clean:
-	rm -f server/dss_server client/dss_client server/user_bootstrap
+	rm -f server/dss_server client/dss_client server/user_bootstrap server/ks_test
