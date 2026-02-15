@@ -1,4 +1,4 @@
-#include "auth.h"
+#include "server/auth.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -343,7 +343,7 @@ int main(int argc, char **argv)
     const char *new_password;
 
     if (argc != 4 || strcmp(argv[1], "register") != 0) {
-        fprintf(stderr, "Usage:\n  ./server/account_provision register <username> <new_password>\n");
+        fprintf(stderr, "Usage:\n  ./tools/account_provision register <username> <new_password>\n");
         return 1;
     }
 
