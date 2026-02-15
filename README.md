@@ -1,3 +1,30 @@
+## Build
+
+Build the runtime deliverables only (default target):
+
+```bash
+make
+```
+
+This builds:
+- `server/dss_server`
+- `client/dss_client`
+
+Build the optional offline provisioning tool separately:
+
+```bash
+make tools
+```
+
+This builds:
+- `tools/account_provision`
+
+Clean runtime and tool binaries:
+
+```bash
+make clean
+```
+
 ## Generate test server keypair (PEM)
 
 Use OpenSSL to create a server private/public keypair for local testing.
@@ -13,7 +40,6 @@ openssl genpkey -algorithm RSA -out server/res/keys/server-private.pem -pkeyopt 
 ```bash
 openssl rsa -pubout -in server/res/keys/server-private.pem -out client/res/server-public.pem
 ```
-
 
 ## Manual tests
 
@@ -34,13 +60,16 @@ After `deletekeys`, the final `signdoc` must be refused with:
 Operation refused: keys deleted (tombstone). Re-registration required.
 ```
 
-
 ## Offline Account Provisioning
 
-Use `server/account_provision` to register accounts directly in `server/res/users.db` from the server machine itself (no network path is used).
+Use `tools/account_provision` to register accounts directly in `server/res/users.db` from the server machine itself (no network path is used).
 
 ```bash
-./server/account_provision register <username> <new_password>
+./tools/account_provision register <username> <new_password>
 ```
 
 This local tool is required to re-register a user after tombstone deletion (`deleted=1`), because active accounts are intentionally not overwritten.
+
+## Deliverable scope
+
+`ks_test` and bundled binary test artefacts were removed because they are development/test-only and are not part of the runtime deliverable.
