@@ -49,9 +49,9 @@ Example interactive flow in the client:
 login <user>
 changepw
 createkeys
-signdoc server/res/testdocs/doc1.txt
+signdoc client/res/testdocs/doc1.txt
 deletekeys
-signdoc server/res/testdocs/doc1.txt
+signdoc client/res/testdocs/doc1.txt
 ```
 
 After `deletekeys`, the final `signdoc` must be refused with:
