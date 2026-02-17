@@ -23,15 +23,14 @@ int dsspacket_build_aad(const dss_header_t *hdr, uint8_t aad_out[DSSPACKET_AAD_L
         return DSSPACKET_ERR_INVALID_ARG;
     }
 
-    /* AAD includes opcode, request nonce, and payload length in network order. */
-    aad_out[0] = hdr->opcode;
+    /* AAD includes request nonce and payload length in network order. */
     for (size_t i = 0; i < REQ_NONCE_LEN; i++) {
-        aad_out[1 + i] = hdr->req_nonce[i];
+        aad_out[i] = hdr->req_nonce[i];
     }
-    aad_out[17] = (uint8_t)((hdr->payload_len >> 24) & 0xFFu);
-    aad_out[18] = (uint8_t)((hdr->payload_len >> 16) & 0xFFu);
-    aad_out[19] = (uint8_t)((hdr->payload_len >> 8) & 0xFFu);
-    aad_out[20] = (uint8_t)(hdr->payload_len & 0xFFu);
+    aad_out[16] = (uint8_t)((hdr->payload_len >> 24) & 0xFFu);
+    aad_out[17] = (uint8_t)((hdr->payload_len >> 16) & 0xFFu);
+    aad_out[18] = (uint8_t)((hdr->payload_len >> 8) & 0xFFu);
+    aad_out[19] = (uint8_t)(hdr->payload_len & 0xFFu);
 
     *aad_len = DSSPACKET_AAD_LEN;
     return 0;
