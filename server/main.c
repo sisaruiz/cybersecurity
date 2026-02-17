@@ -81,7 +81,6 @@ static int send_encrypted_response(int fd,
     }
 
     rsp_hdr.status = htons((uint16_t)status);
-    rsp_hdr.reserved = 0;
     rsp_hdr.data_len = htonl((uint32_t)data_len);
 
     pt[0] = opcode;
