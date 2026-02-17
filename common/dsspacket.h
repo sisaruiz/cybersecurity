@@ -24,7 +24,7 @@ typedef enum dss_opcode {
  * OP_AUTH response data format:
  *   u8 must_change_flag | u8 deleted_flag
  *
- * The request nonce and response header format remain unchanged.
+ * The request nonce format remains unchanged.
  */
 
 typedef enum dss_status {
@@ -40,14 +40,12 @@ typedef enum dss_status {
 #pragma pack(push, 1)
 typedef struct dss_header {
     uint8_t opcode;
-    uint8_t reserved[3];
     uint8_t req_nonce[REQ_NONCE_LEN];
     uint32_t payload_len; /* Network byte order. */
 } dss_header_t;
 
 typedef struct dss_response_header {
     uint16_t status;   /* Network byte order. */
-    uint16_t reserved; /* Network byte order. */
     uint32_t data_len; /* Network byte order. */
 } dss_response_header_t;
 #pragma pack(pop)
