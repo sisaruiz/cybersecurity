@@ -45,7 +45,6 @@ typedef enum dss_status {
 
 #pragma pack(push, 1)
 typedef struct dss_header {
-    uint8_t opcode;
     uint8_t req_nonce[REQ_NONCE_LEN];
     uint32_t payload_len; /* Network byte order. */
 } dss_header_t;

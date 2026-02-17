@@ -45,10 +45,10 @@ openssl rsa -pubout -in server/res/keys/server-private.pem -out client/res/serve
 
 Application operation type is now encrypted inside the AES-GCM plaintext, not sent in clear in the outer header.
 
-- Outer DSS header: `reserved[4] | req_nonce[16] | payload_len[4]`.
+- Outer DSS header: `req_nonce[16] | payload_len[4]`.
 - AES-GCM AAD: `req_nonce[16] | payload_len[4]`.
 - Request plaintext: `u8 opcode | op_specific_bytes...`.
-- Response plaintext: `u8 opcode | u16 status | u16 reserved | u32 data_len | op_specific_bytes...`.
+- Response plaintext: `u8 opcode | u16 status | u32 data_len | op_specific_bytes...`.
 - Ciphertext wire layout is unchanged: `iv[12] | tag[16] | ciphertext[...]`.
 - Replay protection is unchanged and still binds each frame to a unique request nonce.
 
