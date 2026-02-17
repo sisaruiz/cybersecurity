@@ -25,6 +25,48 @@ typedef struct session_state {
     int has_key;
 } session_state_t;
 
+static const char *opcode_name(uint8_t opcode)
+{
+    switch (opcode) {
+    case OP_AUTH:
+        return "AUTH";
+    case OP_CHANGE_PASSWORD:
+        return "CHANGE_PASSWORD";
+    case OP_CREATE_KEYS:
+        return "CREATE_KEYS";
+    case OP_SIGN_DOC:
+        return "SIGN_DOC";
+    case OP_GET_PUBLIC_KEY:
+        return "GET_PUBLIC_KEY";
+    case OP_DELETE_KEYS:
+        return "DELETE_KEYS";
+    case OP_LOGOUT:
+        return "LOGOUT";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static const char *status_name(dss_status_t status)
+{
+    switch (status) {
+    case ST_OK:
+        return "OK";
+    case ST_ERR_AUTH:
+        return "ERR_AUTH";
+    case ST_ERR_BAD_REQ:
+        return "ERR_BAD_REQ";
+    case ST_ERR_INTERNAL:
+        return "ERR_INTERNAL";
+    case ST_ERR_NOT_FOUND:
+        return "ERR_NOT_FOUND";
+    case ST_ERR_DELETED:
+        return "ERR_DELETED";
+    default:
+        return "ERR_UNKNOWN";
+    }
+}
+
 static void session_clear(session_state_t *s)
 {
     if (s == NULL) {
@@ -154,11 +196,15 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    fprintf(stderr, "[server] auth db initialized\n");
+
     listen_fd = tcp_listen(port);
     if (listen_fd < 0) {
         perror("tcp_listen");
         return 1;
     }
+
+    fprintf(stderr, "[server] listening on port %s\n", port);
 
     client_fd = tcp_accept(listen_fd);
     if (client_fd < 0) {
@@ -167,16 +213,20 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    fprintf(stderr, "[server] client connected\n");
+
     /* Perform ECDH handshake and derive directional session keys. */
     if (hs_recv_chlo(client_fd, &client_pub, &client_pub_len) != 0) {
         fprintf(stderr, "hs_recv_chlo failed\n");
         goto cleanup;
     }
+    fprintf(stderr, "[server] handshake: client hello received\n");
 
     if (hs_gen_ecdh_keypair(&server_pub, &server_pub_len, &server_ecdh_priv) != 0) {
         fprintf(stderr, "hs_gen_ecdh_keypair failed\n");
         goto cleanup;
     }
+    fprintf(stderr, "[server] handshake: generated ECDH keypair\n");
 
     if (client_pub_len > SIZE_MAX - server_pub_len) {
         fprintf(stderr, "transcript length overflow\n");
@@ -204,6 +254,8 @@ int main(int argc, char **argv)
         fprintf(stderr, "handshake failed\n");
         goto cleanup;
     }
+
+    fprintf(stderr, "[server] handshake completed\n");
 
     memcpy(key_in, c2s_key, sizeof(key_in));
     memcpy(key_out, s2c_key, sizeof(key_out));
@@ -237,10 +289,12 @@ int main(int argc, char **argv)
         status = ST_ERR_BAD_REQ;
 
         if (dsspacket_recv(client_fd, &in_hdr, &payload) != 0) {
+            fprintf(stderr, "[server] receive failed, closing connection\n");
             dsspacket_free(payload);
             break;
         }
         if (replay_check_and_add(&cache, in_hdr.req_nonce) < 0) {
+            fprintf(stderr, "[server] protocol/replay check failed, closing connection\n");
             dsspacket_free(payload);
             break;
         }
@@ -248,6 +302,7 @@ int main(int argc, char **argv)
         payload_len = ntohl(in_hdr.payload_len);
         if (payload_len < (GCM_IV_LEN + GCM_TAG_LEN) ||
             dsspacket_build_aad(&in_hdr, aad, &aad_len) != 0) {
+            fprintf(stderr, "[server] malformed request frame, closing connection\n");
             dsspacket_free(payload);
             break;
         }
@@ -264,6 +319,7 @@ int main(int argc, char **argv)
         }
 
         if (sc_aead_decrypt(key_in, iv, aad, aad_len, ct, ct_len, tag, pt) != 0) {
+            fprintf(stderr, "[server] request authentication failed, closing connection\n");
             free(pt);
             dsspacket_free(payload);
             break;
@@ -276,6 +332,7 @@ int main(int argc, char **argv)
         }
 
         in_opcode = pt[0];
+        fprintf(stderr, "[server] request opcode=%s\n", opcode_name(in_opcode));
 
         if (in_opcode != OP_AUTH && in_opcode != OP_GET_PUBLIC_KEY && session.is_authenticated == 0) {
             status = ST_ERR_AUTH;
@@ -488,11 +545,17 @@ int main(int argc, char **argv)
 
         if (send_encrypted_response(client_fd, key_out, in_opcode, in_hdr.req_nonce,
                                     status, resp_data, resp_len) != 0) {
+            fprintf(stderr, "[server] response send failed for opcode=%s\n", opcode_name(in_opcode));
             free(resp_data);
             free(pt);
             dsspacket_free(payload);
             break;
         }
+
+        fprintf(stderr,
+                "[server] response opcode=%s status=%s\n",
+                opcode_name(in_opcode),
+                status_name(status));
 
         free(resp_data);
         free(pt);
@@ -500,6 +563,7 @@ int main(int argc, char **argv)
     }
 
 cleanup:
+    fprintf(stderr, "[server] shutting down connection\n");
     session_clear(&session);
     free(sig);
     free(transcript);
