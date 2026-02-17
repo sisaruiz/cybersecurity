@@ -58,14 +58,13 @@ static int send_encrypted_response(int fd,
         return -1;
     }
 
-    pt_len = sizeof(rsp_hdr) + data_len;
+    pt_len = 1u + sizeof(rsp_hdr) + data_len;
     payload_len = GCM_IV_LEN + GCM_TAG_LEN + pt_len;
     if (payload_len > UINT32_MAX) {
         return -1;
     }
 
     memset(&out_hdr, 0, sizeof(out_hdr));
-    out_hdr.opcode = opcode;
     memcpy(out_hdr.req_nonce, req_nonce, REQ_NONCE_LEN);
     out_hdr.payload_len = htonl((uint32_t)payload_len);
 
@@ -84,9 +83,10 @@ static int send_encrypted_response(int fd,
     rsp_hdr.status = htons((uint16_t)status);
     rsp_hdr.data_len = htonl((uint32_t)data_len);
 
-    memcpy(pt, &rsp_hdr, sizeof(rsp_hdr));
+    pt[0] = opcode;
+    memcpy(pt + 1u, &rsp_hdr, sizeof(rsp_hdr));
     if (data_len > 0) {
-        memcpy(pt + sizeof(rsp_hdr), data, data_len);
+        memcpy(pt + 1u + sizeof(rsp_hdr), data, data_len);
     }
 
     iv = payload;
@@ -225,6 +225,7 @@ int main(int argc, char **argv)
         const uint8_t *ct;
         size_t ct_len;
         uint8_t *pt;
+        uint8_t in_opcode;
         dss_status_t status;
         uint8_t *resp_data;
         size_t resp_len;
@@ -268,13 +269,21 @@ int main(int argc, char **argv)
             break;
         }
 
-        if (in_hdr.opcode != OP_AUTH && in_hdr.opcode != OP_GET_PUBLIC_KEY && session.is_authenticated == 0) {
+        if (ct_len < 1u) {
+            free(pt);
+            dsspacket_free(payload);
+            break;
+        }
+
+        in_opcode = pt[0];
+
+        if (in_opcode != OP_AUTH && in_opcode != OP_GET_PUBLIC_KEY && session.is_authenticated == 0) {
             status = ST_ERR_AUTH;
         } else if (session.is_authenticated == 1 && session.deleted == 1 &&
-                   in_hdr.opcode != OP_AUTH && in_hdr.opcode != OP_GET_PUBLIC_KEY &&
-                   in_hdr.opcode != OP_LOGOUT) {
+                   in_opcode != OP_AUTH && in_opcode != OP_GET_PUBLIC_KEY &&
+                   in_opcode != OP_LOGOUT) {
             status = ST_ERR_DELETED;
-        } else if (in_hdr.opcode == OP_AUTH) {
+        } else if (in_opcode == OP_AUTH) {
             uint8_t ulen;
             uint8_t plen;
             const char *user;
@@ -282,19 +291,19 @@ int main(int argc, char **argv)
             int must_change;
             int deleted;
 
-            if (ct_len < 2u) {
+            if (ct_len < 3u) {
                 status = ST_ERR_BAD_REQ;
             } else {
-                ulen = pt[0];
-                if (ct_len < (size_t)(1u + ulen + 1u)) {
+                ulen = pt[1u];
+                if (ct_len < (size_t)(1u + 1u + ulen + 1u)) {
                     status = ST_ERR_BAD_REQ;
                 } else {
-                    plen = pt[1u + ulen];
-                    if (ct_len != (size_t)(2u + ulen + plen) || ulen == 0u || plen == 0u ) {
+                    plen = pt[1u + 1u + ulen];
+                    if (ct_len != (size_t)(1u + 2u + ulen + plen) || ulen == 0u || plen == 0u ) {
                         status = ST_ERR_BAD_REQ;
                     } else {
-                        user = (const char *)(pt + 1u);
-                        pw = (const char *)(pt + 2u + ulen);
+                        user = (const char *)(pt + 2u);
+                        pw = (const char *)(pt + 3u + ulen);
                         char user_buf[256];
                         char pw_buf[256];
                         memcpy(user_buf, user, ulen);
@@ -329,12 +338,12 @@ int main(int argc, char **argv)
                 }
             }
         } else if (session.must_change == 1 &&
-                   in_hdr.opcode != OP_CHANGE_PASSWORD &&
-                   in_hdr.opcode != OP_AUTH &&
-                   in_hdr.opcode != OP_LOGOUT) {
+                   in_opcode != OP_CHANGE_PASSWORD &&
+                   in_opcode != OP_AUTH &&
+                   in_opcode != OP_LOGOUT) {
             status = ST_ERR_AUTH;
         } else {
-            switch (in_hdr.opcode) {
+            switch (in_opcode) {
             case OP_CHANGE_PASSWORD: {
                 uint8_t nlen;
                 char new_pw[256];
@@ -347,16 +356,16 @@ int main(int argc, char **argv)
                     status = ST_ERR_DELETED;
                     break;
                 }
-                if (ct_len < 1u) {
+                if (ct_len < 2u) {
                     status = ST_ERR_BAD_REQ;
                     break;
                 }
-                nlen = pt[0];
-                if (ct_len != (size_t)(1u + nlen) || nlen == 0u ) {
+                nlen = pt[1u];
+                if (ct_len != (size_t)(1u + 1u + nlen) || nlen == 0u ) {
                     status = ST_ERR_BAD_REQ;
                     break;
                 }
-                memcpy(new_pw, pt + 1u, nlen);
+                memcpy(new_pw, pt + 2u, nlen);
                 new_pw[nlen] = '\0';
                 if (ks_derive_session_key(session.username, new_pw, new_key) != 0 ||
                     ks_reencrypt_private_for_new_session_key(session.username, session.key, new_key) != 0 ||
@@ -408,7 +417,9 @@ int main(int argc, char **argv)
                 }
                 sig_out = NULL;
                 sig_len = 0;
-                if (ks_sign_doc_session(session.username, session.key, pt, ct_len, &sig_out, &sig_len) != 0) {
+                if ((ct_len - 1u) > UINT16_MAX) {
+                    status = ST_ERR_BAD_REQ;
+                } else if (ks_sign_doc_session(session.username, session.key, pt + 1u, ct_len - 1u, &sig_out, &sig_len) != 0) {
                     status = ST_ERR_INTERNAL;
                 } else {
                     resp_data = sig_out;
@@ -424,19 +435,19 @@ int main(int argc, char **argv)
                 size_t pub_len;
                 pub = NULL;
                 pub_len = 0;
-                if (ct_len == 0u) {
+                if (ct_len == 1u) {
                     if (session.is_authenticated == 0) {
                         status = ST_ERR_AUTH;
                         break;
                     }
                     target_user = session.username;
                 } else {
-                    uint8_t ulen = pt[0];
-                    if (ct_len != (size_t)(1u + ulen) || ulen == 0u ) {
+                    uint8_t ulen = pt[1u];
+                    if (ct_len != (size_t)(1u + 1u + ulen) || ulen == 0u ) {
                         status = ST_ERR_BAD_REQ;
                         break;
                     }
-                    memcpy(temp_user, pt + 1u, ulen);
+                    memcpy(temp_user, pt + 2u, ulen);
                     temp_user[ulen] = '\0';
                     target_user = temp_user;
                 }
@@ -475,7 +486,7 @@ int main(int argc, char **argv)
             }
         }
 
-        if (send_encrypted_response(client_fd, key_out, in_hdr.opcode, in_hdr.req_nonce,
+        if (send_encrypted_response(client_fd, key_out, in_opcode, in_hdr.req_nonce,
                                     status, resp_data, resp_len) != 0) {
             free(resp_data);
             free(pt);

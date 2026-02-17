@@ -198,6 +198,7 @@ static int send_request_and_get_response(int fd,
     dss_header_t req_hdr;
     dss_header_t resp_hdr;
     dss_response_header_t rsp_plain_hdr;
+    uint8_t resp_opcode;
     uint8_t req_aad[DSSPACKET_AAD_LEN];
     size_t req_aad_len;
     uint8_t *req_payload;
@@ -226,13 +227,12 @@ static int send_request_and_get_response(int fd,
     resp_pt = NULL;
     data = NULL;
 
-    req_payload_len = GCM_IV_LEN + GCM_TAG_LEN + pt_len;
+    req_payload_len = GCM_IV_LEN + GCM_TAG_LEN + 1u + pt_len;
     if (req_payload_len > UINT32_MAX) {
         return -1;
     }
 
     memset(&req_hdr, 0, sizeof(req_hdr));
-    req_hdr.opcode = (uint8_t)opcode;
     if (RAND_bytes(req_hdr.req_nonce, REQ_NONCE_LEN) != 1) {
         return -1;
     }
@@ -247,18 +247,36 @@ static int send_request_and_get_response(int fd,
         return -1;
     }
 
-    if (RAND_bytes(req_payload, GCM_IV_LEN) != 1 ||
-        sc_aead_encrypt(c2s_key,
-                        req_payload,
-                        req_aad,
-                        req_aad_len,
-                        pt,
-                        pt_len,
-                        req_payload + GCM_IV_LEN + GCM_TAG_LEN,
-                        req_payload + GCM_IV_LEN) != 0 ||
-        dsspacket_send(fd, &req_hdr, req_payload) != 0) {
-        free(req_payload);
-        return -1;
+    {
+        uint8_t *req_pt;
+        size_t req_pt_len = 1u + pt_len;
+
+        req_pt = malloc(req_pt_len);
+        if (req_pt == NULL) {
+            free(req_payload);
+            return -1;
+        }
+        req_pt[0] = (uint8_t)opcode;
+        if (pt_len > 0u) {
+            memcpy(req_pt + 1u, pt, pt_len);
+        }
+
+        if (RAND_bytes(req_payload, GCM_IV_LEN) != 1 ||
+            sc_aead_encrypt(c2s_key,
+                            req_payload,
+                            req_aad,
+                            req_aad_len,
+                            req_pt,
+                            req_pt_len,
+                            req_payload + GCM_IV_LEN + GCM_TAG_LEN,
+                            req_payload + GCM_IV_LEN) != 0 ||
+            dsspacket_send(fd, &req_hdr, req_payload) != 0) {
+            free(req_pt);
+            free(req_payload);
+            return -1;
+        }
+
+        free(req_pt);
     }
     free(req_payload);
 
@@ -303,16 +321,22 @@ static int send_request_and_get_response(int fd,
 
     dsspacket_free(resp_payload);
 
-    if (resp_ct_len < sizeof(rsp_plain_hdr)) {
+    if (resp_ct_len < (1u + sizeof(rsp_plain_hdr))) {
         free(resp_pt);
         return -1;
     }
 
-    memcpy(&rsp_plain_hdr, resp_pt, sizeof(rsp_plain_hdr));
+    resp_opcode = resp_pt[0];
+    if (resp_opcode != (uint8_t)opcode) {
+        free(resp_pt);
+        return -1;
+    }
+
+    memcpy(&rsp_plain_hdr, resp_pt + 1u, sizeof(rsp_plain_hdr));
     *status_out = (dss_status_t)ntohs(rsp_plain_hdr.status);
     data_len_u32 = ntohl(rsp_plain_hdr.data_len);
 
-    if (resp_ct_len != sizeof(rsp_plain_hdr) + (size_t)data_len_u32) {
+    if (resp_ct_len != 1u + sizeof(rsp_plain_hdr) + (size_t)data_len_u32) {
         free(resp_pt);
         return -1;
     }
@@ -323,7 +347,7 @@ static int send_request_and_get_response(int fd,
             free(resp_pt);
             return -1;
         }
-        memcpy(data, resp_pt + sizeof(rsp_plain_hdr), data_len_u32);
+        memcpy(data, resp_pt + 1u + sizeof(rsp_plain_hdr), data_len_u32);
     }
 
     free(resp_pt);

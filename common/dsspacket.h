@@ -5,7 +5,7 @@
 #include <stdint.h>
 
 #define REQ_NONCE_LEN 16u
-#define DSSPACKET_AAD_LEN 21u
+#define DSSPACKET_AAD_LEN 20u
 
 typedef enum dss_opcode {
     OP_AUTH = 0,
@@ -18,10 +18,16 @@ typedef enum dss_opcode {
 } dss_opcode_t;
 
 /*
- * OP_AUTH request payload format:
+ * Encrypted request plaintext format:
+ *   u8 opcode | operation-specific bytes
+ *
+ * OP_AUTH operation-specific request bytes:
  *   u8 username_len | username bytes | u8 password_len | password bytes
  *
- * OP_AUTH response data format:
+ * Encrypted response plaintext format:
+ *   u8 opcode | response header | operation-specific bytes
+ *
+ * OP_AUTH response operation-specific bytes:
  *   u8 must_change_flag | u8 deleted_flag
  *
  * The request nonce format remains unchanged.
