@@ -25,6 +25,15 @@ Clean runtime and tool binaries:
 make clean
 ```
 
+## Start-up
+
+To start the server and client, run:
+
+```bash
+./server/dss_server 9000
+./client/dss_client 127.0.0.1 9000
+```
+
 ## Generate test server keypair (PEM)
 
 Use OpenSSL to create a server private/public keypair for local testing.
@@ -80,7 +89,3 @@ Use `tools/account_provision` to register accounts directly in `server/res/users
 ```
 
 This local tool is required to re-register a user after tombstone deletion (`deleted=1`), because active accounts are intentionally not overwritten.
-
-## Deliverable scope
-
-`ks_test` and bundled binary test artefacts were removed because they are development/test-only and are not part of the runtime deliverable.
