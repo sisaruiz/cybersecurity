@@ -52,8 +52,6 @@ openssl rsa -pubout -in server/res/keys/server-private.pem -out client/res/serve
 
 ## Secure packet format (operations channel)
 
-Application operation type is now encrypted inside the AES-GCM plaintext, not sent in clear in the outer header.
-
 - Outer DSS header: `req_nonce[16] | payload_len[4]`.
 - AES-GCM AAD: `req_nonce[16] | payload_len[4]`.
 - Request plaintext: `u8 opcode | op_specific_bytes...`.
@@ -71,7 +69,8 @@ changepw
 createkeys
 signdoc client/res/testdocs/doc1.txt
 deletekeys
-signdoc client/res/testdocs/doc1.txt
+logout
+quit
 ```
 
 After `deletekeys`, the final `signdoc` must be refused with:
